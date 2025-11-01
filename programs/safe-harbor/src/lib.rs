@@ -16,4 +16,8 @@ pub mod safe_harbor {
 
         ctx.accounts.deposit_tokens(deposit)
     }
+
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        ctx.accounts.refund_and_close()
+    }
 }
