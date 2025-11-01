@@ -76,7 +76,6 @@ describe("safe-passage", () => {
   });
 
   it("Initialized escrow and deposit", async () => {
-
     const maker_initial_balance = (await provider.connection.getTokenAccountBalance(makerAtaA)).value;
 
     const tx = await program.methods.make(seed,new BN(escrow_receive_amount), new BN(maker_deposit_amount))
@@ -156,5 +155,69 @@ describe("safe-passage", () => {
       expect(maker_final_balance).to.equal(
         maker_initial_balance + escrow_initial_lamports + vault_initial_lamports - tx_fee
       )
-    });
+  });
+
+  it("Taker deposit, withraw and close escrow and vault and return rent to maker.", async () => {
+    const init_escrow_tx = await program.methods.make(seed, new BN(escrow_receive_amount), new BN(maker_deposit_amount))
+    .accountsPartial({
+      maker: maker.publicKey,
+      mintA: mintA,
+      mintB: mintB,
+      makerAtaA: makerAtaA,
+      escrow: escrowPDA,
+      vault:vault,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_PROGRAM_ID,
+      systemProgram: anchor.web3.SystemProgram.programId,
+    })
+    .rpc();
+    await provider.connection.confirmTransaction(init_escrow_tx, "confirmed");
+
+    const maker_initial_balance = (await provider.connection.getAccountInfo(maker.publicKey)).lamports;
+    const maker_initial_mint_b_balance = (await provider.connection.getTokenAccountBalance(makerAtaB)).value;
+    const taker_initial_mint_a_balance = (await provider.connection.getTokenAccountBalance(takerAtaA)).value;
+
+    const tx = await program.methods.take()
+    .accountsPartial({
+      taker: taker.publicKey,
+      maker: maker.publicKey,
+      mintA: mintA,
+      mintB: mintB,
+      makerAtaB: makerAtaB,
+      takerAtaA: takerAtaA,
+      takerAtaB: takerAtaB,
+      escrow: escrowPDA,
+      vault:vault,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_PROGRAM_ID,
+      systemProgram: anchor.web3.SystemProgram.programId,
+    })
+    .signers([taker])
+    .rpc();
+    console.log("Your transaction signature", tx);
+    await provider.connection.confirmTransaction(tx, "confirmed");
+  
+    const escrow_acc = await program.account.escrow.getAccountInfo(escrowPDA);
+    const vault_acc = await provider.connection.getAccountInfo(vault);
+    const maker_final_balance = (await provider.connection.getAccountInfo(maker.publicKey)).lamports;
+    const maker_final_mint_b_balance = (await provider.connection.getTokenAccountBalance(makerAtaB)).value;
+    const taker_final_mint_a_balance = (await provider.connection.getTokenAccountBalance(takerAtaA)).value;
+
+    expect(escrow_acc).to.be.null;
+    expect(vault_acc).to.be.null;
+
+    // Check balances
+    expect(
+      Number(maker_final_mint_b_balance.amount))
+      .to.equal(Number(maker_initial_mint_b_balance.amount) + escrow_receive_amount);
+    expect(
+      Number(taker_final_mint_a_balance.amount))
+      .to.equal(Number(taker_initial_mint_a_balance.amount) + maker_deposit_amount);
+    expect(
+      Number(taker_final_mint_a_balance.amount))
+      .to.equal(Number(taker_initial_mint_a_balance.amount) + maker_deposit_amount);
+        
+    // Check rent returned to maker
+    expect(maker_final_balance - maker_initial_balance).be.greaterThan(0);
+  });
 });
