@@ -111,4 +111,50 @@ describe("safe-passage", () => {
       .to.equal(Number(maker_initial_balance.amount) - maker_deposit_amount);
   });
 
+  it("Refund maker and close escrow and vault.", async () => {
+    const maker_initial_balance = (await provider.connection.getAccountInfo(maker.publicKey)).lamports;
+    const maker_initial_mint_a_balance = (await provider.connection.getTokenAccountBalance(makerAtaA)).value;
+    const escrow_initial_lamports = (await provider.connection.getAccountInfo(escrowPDA)).lamports;
+    const vault_initial_lamports = (await provider.connection.getAccountInfo(vault)).lamports;
+
+    const tx = await program.methods.refund()
+    .accountsPartial({
+      maker: maker.publicKey,
+      mintA: mintA,
+      makerAtaA: makerAtaA,
+      escrow: escrowPDA,
+      vault:vault,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_PROGRAM_ID,
+      systemProgram: anchor.web3.SystemProgram.programId,
+    })
+    .rpc();
+    console.log("Your transaction signature", tx);
+    await provider.connection.confirmTransaction(tx, "confirmed");
+
+    const txDetails = await provider.connection.getTransaction(tx, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0
+    });
+  
+    const tx_fee = txDetails.meta.fee;
+
+    const escrow_acc = await program.account.escrow.getAccountInfo(escrowPDA);
+    const vault_acc = await provider.connection.getAccountInfo(vault);
+    const maker_final_balance = (await provider.connection.getAccountInfo(maker.publicKey)).lamports;
+    const maker_final_mint_a_balance = (await provider.connection.getTokenAccountBalance(makerAtaA)).value;
+
+    expect(escrow_acc).to.be.null;
+    expect(vault_acc).to.be.null;
+
+    // Check balances
+    expect(
+      Number(maker_final_mint_a_balance.amount))
+      .to.equal(Number(maker_initial_mint_a_balance.amount) + maker_deposit_amount);
+      
+    // Check rent returned to maker
+      expect(maker_final_balance).to.equal(
+        maker_initial_balance + escrow_initial_lamports + vault_initial_lamports - tx_fee
+      )
+    });
 });
