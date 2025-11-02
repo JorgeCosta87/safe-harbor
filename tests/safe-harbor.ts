@@ -20,7 +20,9 @@ describe("safe-passage", () => {
   const program = anchor.workspace.SafeHarbor as Program<SafeHarbor>;
 
   const maker = provider.wallet;
-  const taker = anchor.web3.Keypair.generate();
+  const taker = anchor.web3.Keypair.fromSeed(
+    Uint8Array.from(Buffer.from("CQB35H179dvx8ADpLUiWkf45XWfydGMF"))
+  );
 
   let mintA: anchor.web3.PublicKey;
   let mintB: anchor.web3.PublicKey;
@@ -33,7 +35,7 @@ describe("safe-passage", () => {
 
   let vault: anchor.web3.PublicKey;
 
-  const seed = new BN(64)
+  const seed = new BN(66)
 
   const escrowPDA = anchor.web3.PublicKey.findProgramAddressSync(
     [
@@ -43,21 +45,21 @@ describe("safe-passage", () => {
     program.programId
   )[0];
 
-  const maker_deposit_amount = 100000000;
-  const escrow_receive_amount = 1500000000;
+  const maker_deposit_amount = 1_000_000_000;
+  const escrow_receive_amount = 1_500_000_000;
 
 
   it("Request airdrop to taker.", async () => {
-     const signature = await provider.connection.requestAirdrop(taker.publicKey, 10000000000);
+     const signature = await provider.connection.requestAirdrop(taker.publicKey, 1_000_000_000);
      await provider.connection.confirmTransaction(signature);
      console.log("\nAirdrop to taker successful - Signature", signature);
   });
 
   it("Create mint accounts and mint to maker and taker.", async () => {
-    mintA = await createMint(provider.connection, maker.payer, provider.publicKey, provider.publicKey, 6);
+    mintA = await createMint(provider.connection, maker.payer, provider.publicKey, provider.publicKey, 9);
     console.log("\nmintA", mintA.toBase58());
 
-    mintB = await createMint(provider.connection, maker.payer, provider.publicKey, provider.publicKey, 6);
+    mintB = await createMint(provider.connection, maker.payer, provider.publicKey, provider.publicKey, 9);
     console.log("mintB", mintB.toBase58());
 
     vault = getAssociatedTokenAddressSync(mintA, escrowPDA, true);
@@ -72,7 +74,7 @@ describe("safe-passage", () => {
     console.log("Tokens minted to maker ata A for deposit", makerAtaA.toBase58());
     
     await mintTo(provider.connection, maker.payer, mintB, takerAtaB, maker.payer, escrow_receive_amount);
-    console.log("Tokens minted to taker ata B for deposit\n", takerAtaB.toBase58());
+    console.log("Tokens minted to taker ata B for deposit", takerAtaB.toBase58());
   });
 
   it("Initialized escrow and deposit", async () => {
@@ -176,6 +178,8 @@ describe("safe-passage", () => {
     const maker_initial_balance = (await provider.connection.getAccountInfo(maker.publicKey)).lamports;
     const maker_initial_mint_b_balance = (await provider.connection.getTokenAccountBalance(makerAtaB)).value;
     const taker_initial_mint_a_balance = (await provider.connection.getTokenAccountBalance(takerAtaA)).value;
+    const escrow_initial_lamports = (await provider.connection.getAccountInfo(escrowPDA)).lamports;
+    const vault_initial_lamports = (await provider.connection.getAccountInfo(vault)).lamports;
 
     const tx = await program.methods.take()
     .accountsPartial({
@@ -192,10 +196,16 @@ describe("safe-passage", () => {
       associatedTokenProgram: ASSOCIATED_PROGRAM_ID,
       systemProgram: anchor.web3.SystemProgram.programId,
     })
-    .signers([taker])
-    .rpc();
-    console.log("Your transaction signature", tx);
-    await provider.connection.confirmTransaction(tx, "confirmed");
+    .transaction();
+
+    const signature = await anchor.web3.sendAndConfirmTransaction(
+      provider.connection,
+      tx,
+      [taker]
+    );
+
+    console.log("Your transaction signature", signature);
+    await provider.connection.confirmTransaction(signature, "confirmed");
   
     const escrow_acc = await program.account.escrow.getAccountInfo(escrowPDA);
     const vault_acc = await provider.connection.getAccountInfo(vault);
@@ -218,6 +228,6 @@ describe("safe-passage", () => {
       .to.equal(Number(taker_initial_mint_a_balance.amount) + maker_deposit_amount);
         
     // Check rent returned to maker
-    expect(maker_final_balance - maker_initial_balance).be.greaterThan(0);
+    expect(maker_final_balance).to.equal(maker_initial_balance + escrow_initial_lamports + vault_initial_lamports)
   });
 });
